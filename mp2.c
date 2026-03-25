@@ -22,7 +22,7 @@ MODULE_AUTHOR("Josh Jenks <jajenks2@illinois.edu>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("CS-423 MP2");
 
-#define DEBUG 1
+#define DEBUG 0
 #define ADMISSION_THRESHOLD 693 
 
 enum mp2_state {
