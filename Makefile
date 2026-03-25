@@ -1,4 +1,4 @@
-KERNEL_SRC:= <PATH_TO_YOUR_5.15.127_KERNEL>
+KERNEL_SRC:= /home/jajenks2/linux-5.15.165
 SUBDIR= $(PWD)
 GCC:=gcc
 RM:=rm
