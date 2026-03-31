@@ -1,0 +1,9 @@
+FP ops & compile without warns: 5
+README: 5
+Comment: 5
+Slab alloc & init/dealloc: 10
+User app: 10
+Process Control Block: 5
+registration other, deregistration, read/write: 0
+admission control: 0
+Timer, yield, dispatch: 35
