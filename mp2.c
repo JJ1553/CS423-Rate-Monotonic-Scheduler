@@ -75,7 +75,7 @@ static void mp2_wakeup_timer(struct timer_list *t)
 	if (mp2_dispatcher_task)
 		wake_up_process(mp2_dispatcher_task);
 
-#ifdef DEBUG
+#if DEBUG
 	pr_info("MP2 timer fired: pid=%d now READY\n", wakeup_task->task->pid);
 #endif
 }
@@ -182,7 +182,7 @@ static int mp2_dispatcher(void *data)
 				mp2_set_task_fifo(next_task->task);
 				wake_up_process(next_task->task);
 
-				#ifdef DEBUG
+				#if DEBUG
 					pr_info("MP2 dispatcher: scheduled pid=%d (no current task)\n",  next_task->task->pid);
 				#endif
 			}
@@ -203,12 +203,12 @@ static int mp2_dispatcher(void *data)
 				mp2_set_task_fifo(next_task->task);
 				wake_up_process(next_task->task);
 
-				#ifdef DEBUG
+				#if DEBUG
 					pr_info("MP2 dispatcher: switched from sleeping current to pid=%d\n", next_task->task->pid);
 				#endif
 			} else {
 				mp2_current = NULL;
-				#ifdef DEBUG
+				#if DEBUG
 					pr_info("MP2 dispatcher: no READY task, current cleared\n");
 				#endif
 			}
@@ -234,7 +234,7 @@ static int mp2_dispatcher(void *data)
 				mp2_set_task_fifo(next_task->task);
 				wake_up_process(next_task->task);
 
-				#ifdef DEBUG
+				#if DEBUG
 					pr_info("MP2 dispatcher: preempt pid=%d -> pid=%d\n", old_task->task->pid, next_task->task->pid);
 				#endif
 			}
@@ -289,7 +289,8 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 	struct mp2_task *yield_task;
 	unsigned long next_release;
 	unsigned long total_util;
-	struct mp2_task *curr_task;
+	// struct mp2_task *curr_task;
+	static unsigned long mp2_total_util;
 
 	if (count == 0)
 		return 0;
@@ -305,7 +306,7 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 	switch (buf[0]) {
 
 		case 'R':
-		
+
 			parsed = sscanf(buf, "R,%d,%lu,%lu", &pid, &period_ms, &computation_ms);
 			if (parsed != 3) {
 				kfree(buf);
@@ -317,42 +318,15 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 				return -EINVAL;
 			}
 
-			#ifdef DEBUG
+			#if DEBUG
 				pr_info("MP2 register request: pid=%d period=%lu computation=%lu\n", pid, period_ms, computation_ms);
 			#endif
-			
+
 			linux_task = find_task_by_pid(pid);
 			if (!linux_task) {
 				kfree(buf);
 				return -ESRCH;
 			}
-
-			mutex_lock(&mp2_lock);
-
-			if (mp2_find_task(pid)) {
-				mutex_unlock(&mp2_lock);
-				kfree(buf);
-				return -EEXIST;
-			}
-
-			total_util = (computation_ms * 1000) / period_ms;
-
-			list_for_each_entry(curr_task, &mp2_task_list, list) {
-				total_util += (curr_task->computation_ms * 1000) /
-					      curr_task->period_ms;
-			}
-
-			#ifdef DEBUG
-				pr_info("MP2 admission check: util=%lu threshold=%d\n", total_util, ADMISSION_THRESHOLD);
-			#endif
-
-			if (total_util > ADMISSION_THRESHOLD) {
-				mutex_unlock(&mp2_lock);
-				kfree(buf);
-				return -EINVAL;
-			}
-
-			mutex_unlock(&mp2_lock);
 
 			new_task = kmem_cache_alloc(mp2_task_cache, GFP_KERNEL);
 			if (!new_task) {
@@ -368,6 +342,9 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 			timer_setup(&new_task->wakeup_timer, mp2_wakeup_timer, 0);
 			INIT_LIST_HEAD(&new_task->list);
 
+			total_util = (computation_ms * 1000) / period_ms;
+			
+
 			mutex_lock(&mp2_lock);
 
 			if (mp2_find_task(pid)) {
@@ -377,9 +354,24 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 				return -EEXIST;
 			}
 
+			#if DEBUG
+				pr_info("MP2 admission check: util=%lu threshold=%d\n", total_util, ADMISSION_THRESHOLD);
+			#endif
+
+			if (mp2_total_util + total_util > ADMISSION_THRESHOLD) {
+				mutex_unlock(&mp2_lock);
+				kmem_cache_free(mp2_task_cache, new_task);
+				kfree(buf);
+				return -EINVAL;
+			}
+
+			mp2_total_util += total_util;
 			list_add_tail(&new_task->list, &mp2_task_list);
 
 			mutex_unlock(&mp2_lock);
+
+			if (mp2_dispatcher_task)
+				wake_up_process(mp2_dispatcher_task);
 		break;
 
 		case 'Y':
@@ -429,7 +421,7 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 			if (mp2_dispatcher_task)
 				wake_up_process(mp2_dispatcher_task);
 
-			#ifdef DEBUG
+			#if DEBUG
 				pr_info("MP2 yield: pid=%d sleeping until jiffies=%lu\n", pid, next_release);
 			#endif
 
@@ -456,6 +448,9 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 				kfree(buf);
 				return -ESRCH;
 			}
+
+			mp2_total_util -= (task_to_remove->computation_ms * 1000) / task_to_remove->period_ms;
+
 			if (mp2_current == task_to_remove)
 				mp2_current = NULL;
 
@@ -465,7 +460,10 @@ static ssize_t mp2_status_write(struct file *file, const char __user *buffer,
 			del_timer_sync(&task_to_remove->wakeup_timer);
 			kmem_cache_free(mp2_task_cache, task_to_remove);
 			
-			#ifdef DEBUG
+			if (mp2_dispatcher_task)
+				wake_up_process(mp2_dispatcher_task);
+
+			#if DEBUG
 				pr_info("MP2 deregistered: pid=%d\n", pid);
 			#endif
 		break;
@@ -491,7 +489,7 @@ static const struct proc_ops mp2_proc_ops = {
 // mp2_init - Called when module is loaded
 int __init mp2_init(void)
 {
-#ifdef DEBUG
+#if DEBUG
 	printk(KERN_ALERT "MP2 MODULE LOADING\n");
 #endif
 
@@ -533,7 +531,7 @@ void __exit mp2_exit(void)
 {
 	struct mp2_task *curr_task;
 
-#ifdef DEBUG
+#if DEBUG
 	printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
 #endif
 

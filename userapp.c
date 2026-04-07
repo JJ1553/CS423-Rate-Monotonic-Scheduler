@@ -145,7 +145,7 @@ static void do_job(void)
 
 	sum = 0;
 
-	for (i = 0; i < 100000; i++) {
+	for (i = 0; i < 2000000; i++) {
 		volatile unsigned long long fac = 1;
 
 		for (j = 1; j <= 30; j++)
