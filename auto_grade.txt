@@ -4,6 +4,6 @@ Comment: 5
 Slab alloc & init/dealloc: 10
 User app: 10
 Process Control Block: 5
-registration other, deregistration, read/write: 0
-admission control: 0
+registration other, deregistration, read/write: 20
+admission control: 5
 Timer, yield, dispatch: 35
